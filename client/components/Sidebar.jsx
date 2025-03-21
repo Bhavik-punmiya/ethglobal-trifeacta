@@ -11,8 +11,8 @@ const menuItems = [
   { name: "Profile Page", icon: User, href: "/profile" },
   { name: "Contest", icon: Trophy, href: "/contest" },
   { name: "Claim", icon: Flag, href: "/claim" },
-  { name: "Settings", icon: Settings, href: "/settings" },
   { name: "Create", icon: Users, href: "/host" },
+  { name: "Settings", icon: Settings, href: "/settings" },
 ];
 
 export default function Sidebar() {
