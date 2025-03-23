@@ -32,9 +32,9 @@ export default function CreateCompetition() {
   const [subtitle, setSubtitle] = useState("");
   const [description, setDescription] = useState("");
   const [winners, setWinners] = useState([
-    { place: 1, amount: "", icon: <Trophy className="w-6 h-6 text-yellow-500" /> },
-    { place: 2, amount: "", icon: <Medal className="w-6 h-6 text-gray-400" /> },
-    { place: 3, amount: "", icon: <Medal className="w-6 h-6 text-amber-700" /> }
+    { place: 1, amount: "", icon: "🥇" },
+    { place: 2, amount: "", icon: "🥈" },
+    { place: 3, amount: "", icon: "🥉" }
   ]);
   const [endDate, setEndDate] = useState(new Date());
   const [dataset, setDataset] = useState(null);
@@ -73,9 +73,24 @@ export default function CreateCompetition() {
       {
         place: winners.length + 1,
         amount: "",
-        icon: <Award className="w-6 h-6 text-purple-500" />
+        icon: "🏅"
       },
     ]);
+  };
+
+  // Helper function to render winner icon
+  const renderWinnerIcon = (iconType) => {
+    switch(iconType) {
+      case "🥇":
+        return <Trophy className="w-6 h-6 text-yellow-500" />;
+      case "🥈":
+        return <Medal className="w-6 h-6 text-gray-400" />;
+      case "🥉":
+        return <Medal className="w-6 h-6 text-amber-700" />;
+      case "🏅":
+      default:
+        return <Award className="w-6 h-6 text-purple-500" />;
+    }
   };
 
   // Handle image upload
@@ -160,42 +175,42 @@ export default function CreateCompetition() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
+  
     // Form validation
     if (calculateTotalPrize() <= 0) {
       toast.error("Please set prize amounts for winners");
       return;
     }
-
+  
     if (!image) {
       toast.error("Please upload a contest image");
       return;
     }
-
+  
     if (!dataset) {
       toast.error("Please upload a dataset");
       return;
     }
-
+  
     try {
       setIsSubmitting(true);
       toast.loading("Preparing to deploy contract...", { id: 'deployment' });
-
+  
       // Blockchain part
       const prizeDistribution = winners.map(winner => winner.amount);
       const prizeDistributionWei = prizeDistribution.map(amount => Web3.utils.toWei(amount, 'ether'));
       const totalPrizePoolWei = prizeDistributionWei
         .reduce((sum, amount) => sum.add(Web3.utils.toBN(amount)), Web3.utils.toBN(0))
         .toString();
-
+  
       if (typeof window.ethereum === 'undefined') {
         toast.error("Please install MetaMask");
         setIsSubmitting(false);
         return;
       }
-
+  
       toast.loading("Waiting for MetaMask confirmation...", { id: 'deployment' });
-
+  
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
       const web3 = new Web3(window.ethereum);
       const contract = new web3.eth.Contract(contractJson.abi);
@@ -203,16 +218,19 @@ export default function CreateCompetition() {
         data: contractJson.bytecode,
         arguments: [prizeDistributionWei],
       });
-
+  
       const receipt = await deployment.send({
         from: accounts[0],
         value: totalPrizePoolWei,
       });
-
+  
       const networkId = await web3.eth.net.getId();
       const explorerUrl = getExplorerUrl(networkId, receipt.transactionHash);
-      const contractAddress = receipt._address;
 
+      console.log(receipt)
+
+      const contractAddress = receipt._address; // FIXED: Use `contractAddress` instead of `_contractAddress`
+      console.log(contractAddress)
       toast.success(
         <div>
           Contract deployed successfully!
@@ -227,14 +245,13 @@ export default function CreateCompetition() {
         </div>,
         { id: 'deployment', duration: 10000 }
       );
-
+  
       // Firebase part
       // Upload image and dataset to Firebase Storage
-      // For now, we'll just use placeholder URLs
       const imageUrl = imagePreview || "/api/placeholder/400/200";
       const datasetUrl = "/datasets/placeholder.csv";
-
-      // Prepare the contest data
+  
+      // Prepare the contest data with serializable winners
       const contestData = {
         title,
         subtitle,
@@ -243,7 +260,11 @@ export default function CreateCompetition() {
         datasetName: datasetName,
         datasetUrl: datasetUrl,
         image: imageUrl,
-        winners,
+        winners: winners.map(winner => ({
+          place: winner.place,
+          amount: winner.amount,
+          icon: winner.icon
+        })),
         totalPrizePool: calculateTotalPrize(),
         contractAddress,
         contractOwner: accounts[0],
@@ -255,12 +276,10 @@ export default function CreateCompetition() {
           "Each user can submit only one prediction file per day.",
         ],
       };
-
-      console.log(contestData);
-      // Create the contest in Firestore
+  
+      console.log("Contest Data:", contestData);
       const contestId = await createContest(contestData);
-
-      // Navigate to the new contest page
+  
       router.push(`/contest/${contestId}`);
     } catch (error) {
       console.error("Error creating contest:", error);
@@ -269,6 +288,7 @@ export default function CreateCompetition() {
       setIsSubmitting(false);
     }
   };
+  
 
   return (
     <div className="max-w-3xl mx-auto p-6">
@@ -356,7 +376,7 @@ export default function CreateCompetition() {
               <div className="space-y-4">
                 {winners.map((winner, index) => (
                   <div key={index} className="flex items-center gap-4">
-                    <div className="w-10">{winner.icon}</div>
+                    <div className="w-10">{renderWinnerIcon(winner.icon)}</div>
                     <div className="font-medium w-16">{winner.place === 1 ? '1st' : winner.place === 2 ? '2nd' : winner.place === 3 ? '3rd' : `${winner.place}th`}</div>
                     <div className="flex-1">
                       <div className="relative">
