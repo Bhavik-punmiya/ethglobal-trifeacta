@@ -9,6 +9,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Trophy, Medal, Award, Upload, Plus, Calendar as CalendarIcon, FileUp } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format } from "date-fns";
+import Web3 from 'web3';
+import contractJson from '@/lib/contracts/DecentralizedKaggle.json';
 
 export default function CreateCompetition() {
   const [title, setTitle] = useState("");
@@ -120,35 +122,64 @@ export default function CreateCompetition() {
     setDatasetName("");
   };
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    // Form validation
+  
     if (calculateTotalPrize() <= 0) {
       alert("Please set prize amounts for winners");
       return;
     }
-    
+  
     if (!image) {
       alert("Please upload a contest image");
       return;
     }
-    
+  
     if (!dataset) {
       alert("Please upload a dataset");
       return;
     }
-    
-    console.log({
-      title,
-      subtitle,
-      description,
-      winners,
-      endDate,
-      dataset,
-      image,
-      totalPrize: calculateTotalPrize()
-    });
+  
+    try {
+      const prizeDistribution = winners.map(winner => winner.amount);
+      const prizeDistributionWei = prizeDistribution.map(amount => Web3.utils.toWei(amount, 'ether'));
+      const totalPrizePoolWei = prizeDistributionWei
+        .reduce((sum, amount) => sum.add(Web3.utils.toBN(amount)), Web3.utils.toBN(0))
+        .toString();
+  
+      if (typeof window.ethereum === 'undefined') {
+        alert('Please install MetaMask');
+        return;
+      }
+  
+      const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+      const web3 = new Web3(window.ethereum);
+      const contract = new web3.eth.Contract(contractJson.abi);
+      const deployment = contract.deploy({
+        data: contractJson.bytecode,
+        arguments: [prizeDistributionWei],
+      });
+      const receipt = await deployment.send({
+        from: accounts[0],
+        value: totalPrizePoolWei,
+      });
+  
+      console.log('Contract deployed at:', receipt.contractAddress);
+      console.log({
+        title,
+        subtitle,
+        description,
+        winners,
+        endDate,
+        dataset,
+        image,
+        totalPrize: calculateTotalPrize(),
+        contractAddress: receipt.contractAddress,
+      });
+    } catch (error) {
+      console.error('Deployment error:', error);
+      alert('Error deploying contract. Please check the console for details.');
+    }
   };
 
   return (
