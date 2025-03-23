@@ -11,6 +11,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { format } from "date-fns";
 import Web3 from 'web3';
 import contractJson from '@/lib/contracts/DecentralizedKaggle.json';
+import toast, { Toaster } from 'react-hot-toast';
 
 export default function CreateCompetition() {
   const [title, setTitle] = useState("");
@@ -29,11 +30,10 @@ export default function CreateCompetition() {
   const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [isDraggingDataset, setIsDraggingDataset] = useState(false);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
-  
+
   const imageInputRef = useRef(null);
   const datasetInputRef = useRef(null);
 
-  // Calculate total prize pool
   const calculateTotalPrize = () => {
     return winners.reduce((total, winner) => {
       return total + (parseFloat(winner.amount) || 0);
@@ -48,7 +48,7 @@ export default function CreateCompetition() {
 
   const addWinner = () => {
     setWinners([
-      ...winners, 
+      ...winners,
       { 
         place: winners.length + 1, 
         amount: "", 
@@ -80,7 +80,6 @@ export default function CreateCompetition() {
   const handleImageDrop = (e) => {
     e.preventDefault();
     setIsDraggingImage(false);
-    
     const file = e.dataTransfer.files[0];
     if (file) {
       setImage(file);
@@ -95,7 +94,6 @@ export default function CreateCompetition() {
   const handleDatasetDrop = (e) => {
     e.preventDefault();
     setIsDraggingDataset(false);
-    
     const file = e.dataTransfer.files[0];
     if (file) {
       setDataset(file);
@@ -122,36 +120,52 @@ export default function CreateCompetition() {
     setDatasetName("");
   };
 
+  const getExplorerUrl = (networkId, txHash) => {
+    const explorers = {
+      1: `https://etherscan.io/tx/${txHash}`, // Mainnet
+      3: `https://ropsten.etherscan.io/tx/${txHash}`, // Ropsten
+      4: `https://rinkeby.etherscan.io/tx/${txHash}`, // Rinkeby
+      5: `https://goerli.etherscan.io/tx/${txHash}`, // Goerli
+      42: `https://kovan.etherscan.io/tx/${txHash}`, // Kovan
+      11155111: `https://sepolia.etherscan.io/tx/${txHash}`, // Sepolia
+    };
+    return explorers[networkId] || `https://etherscan.io/tx/${txHash}`;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
-  
+
     if (calculateTotalPrize() <= 0) {
-      alert("Please set prize amounts for winners");
+      toast.error("Please set prize amounts for winners");
       return;
     }
-  
+
     if (!image) {
-      alert("Please upload a contest image");
+      toast.error("Please upload a contest image");
       return;
     }
-  
+
     if (!dataset) {
-      alert("Please upload a dataset");
+      toast.error("Please upload a dataset");
       return;
     }
-  
+
     try {
+      toast.loading("Preparing to deploy contract...", { id: 'deployment' });
+
       const prizeDistribution = winners.map(winner => winner.amount);
       const prizeDistributionWei = prizeDistribution.map(amount => Web3.utils.toWei(amount, 'ether'));
       const totalPrizePoolWei = prizeDistributionWei
         .reduce((sum, amount) => sum.add(Web3.utils.toBN(amount)), Web3.utils.toBN(0))
         .toString();
-  
+
       if (typeof window.ethereum === 'undefined') {
-        alert('Please install MetaMask');
+        toast.error("Please install MetaMask");
         return;
       }
-  
+
+      toast.loading("Waiting for MetaMask confirmation...", { id: 'deployment' });
+
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
       const web3 = new Web3(window.ethereum);
       const contract = new web3.eth.Contract(contractJson.abi);
@@ -159,11 +173,30 @@ export default function CreateCompetition() {
         data: contractJson.bytecode,
         arguments: [prizeDistributionWei],
       });
+
       const receipt = await deployment.send({
         from: accounts[0],
         value: totalPrizePoolWei,
       });
-  
+
+      const networkId = await web3.eth.net.getId();
+      const explorerUrl = getExplorerUrl(networkId, receipt.transactionHash);
+
+      toast.success(
+        <div>
+          Contract deployed successfully!
+          <a
+            href={explorerUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-blue-500 underline ml-2"
+          >
+            View on Explorer
+          </a>
+        </div>,
+        { id: 'deployment', duration: 10000 }
+      );
+
       console.log('Contract deployed at:', receipt.contractAddress);
       console.log({
         title,
@@ -178,17 +211,17 @@ export default function CreateCompetition() {
       });
     } catch (error) {
       console.error('Deployment error:', error);
-      alert('Error deploying contract. Please check the console for details.');
+      toast.error("Error deploying contract. Please check the console for details.", { id: 'deployment' });
     }
   };
 
   return (
     <div className="max-w-3xl mx-auto p-6">
+      <Toaster />
       <Card className="shadow-lg border-0">
         <CardContent className="p-8">
           <h2 className="text-3xl font-bold mb-8 text-center">Create a Competition</h2>
           <form onSubmit={handleSubmit} className="space-y-8">
-            
             {/* Contest Image Upload */}
             <div 
               className={`border-2 border-dashed rounded-lg p-10 text-center cursor-pointer transition-colors ${isDraggingImage ? 'bg-blue-50 border-blue-300' : 'border-gray-300 hover:border-gray-400'}`}
@@ -297,7 +330,7 @@ export default function CreateCompetition() {
                           setWinners(newWinners);
                         }}
                       >
-                        &times;
+                        ×
                       </Button>
                     )}
                   </div>
@@ -320,7 +353,7 @@ export default function CreateCompetition() {
               </div>
             </div>
 
-            {/* Contest End Date - with Popover Calendar */}
+            {/* Contest End Date */}
             <div className="bg-gray-50 p-6 rounded-lg">
               <div className="flex items-center mb-4">
                 <CalendarIcon className="w-5 h-5 mr-2 text-blue-500" />
