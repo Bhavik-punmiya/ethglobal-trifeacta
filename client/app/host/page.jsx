@@ -1,14 +1,28 @@
 "use client";
 
 import { useState, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Card, CardContent } from "@/components/ui/card";
-import { Trophy, Medal, Award, Upload, Plus, Calendar as CalendarIcon, FileUp } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Trophy,
+  Medal,
+  Award,
+  Upload,
+  Plus,
+  Calendar as CalendarIcon,
+  FileUp,
+} from "lucide-react";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { format } from "date-fns";
+import { createContest } from "@/lib/firebase-utils";
 import Web3 from 'web3';
 import contractJson from '@/lib/contracts/DecentralizedKaggle.json';
 import toast, { Toaster } from 'react-hot-toast';
@@ -30,33 +44,41 @@ export default function CreateCompetition() {
   const [isDraggingImage, setIsDraggingImage] = useState(false);
   const [isDraggingDataset, setIsDraggingDataset] = useState(false);
   const [isCalendarOpen, setIsCalendarOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const imageInputRef = useRef(null);
   const datasetInputRef = useRef(null);
+  const router = useRouter();
 
+  // Calculate total prize pool
   const calculateTotalPrize = () => {
-    return winners.reduce((total, winner) => {
-      return total + (parseFloat(winner.amount) || 0);
-    }, 0).toFixed(2);
+    return winners
+      .reduce((total, winner) => {
+        return total + (parseFloat(winner.amount) || 0);
+      }, 0)
+      .toFixed(2);
   };
 
+  // Handle winner prize amount change
   const handleWinnerChange = (index, value) => {
     const newWinners = [...winners];
     newWinners[index].amount = value;
     setWinners(newWinners);
   };
 
+  // Add additional winner
   const addWinner = () => {
     setWinners([
       ...winners,
-      { 
-        place: winners.length + 1, 
-        amount: "", 
-        icon: <Award className="w-6 h-6 text-purple-500" /> 
-      }
+      {
+        place: winners.length + 1,
+        amount: "",
+        icon: <Award className="w-6 h-6 text-purple-500" />
+      },
     ]);
   };
 
+  // Handle image upload
   const handleImageUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -69,6 +91,7 @@ export default function CreateCompetition() {
     }
   };
 
+  // Handle dataset upload
   const handleDatasetUpload = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -77,9 +100,11 @@ export default function CreateCompetition() {
     }
   };
 
+  // Handle image drag and drop
   const handleImageDrop = (e) => {
     e.preventDefault();
     setIsDraggingImage(false);
+
     const file = e.dataTransfer.files[0];
     if (file) {
       setImage(file);
@@ -94,6 +119,7 @@ export default function CreateCompetition() {
   const handleDatasetDrop = (e) => {
     e.preventDefault();
     setIsDraggingDataset(false);
+
     const file = e.dataTransfer.files[0];
     if (file) {
       setDataset(file);
@@ -135,6 +161,7 @@ export default function CreateCompetition() {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
+    // Form validation
     if (calculateTotalPrize() <= 0) {
       toast.error("Please set prize amounts for winners");
       return;
@@ -151,8 +178,10 @@ export default function CreateCompetition() {
     }
 
     try {
+      setIsSubmitting(true);
       toast.loading("Preparing to deploy contract...", { id: 'deployment' });
 
+      // Blockchain part
       const prizeDistribution = winners.map(winner => winner.amount);
       const prizeDistributionWei = prizeDistribution.map(amount => Web3.utils.toWei(amount, 'ether'));
       const totalPrizePoolWei = prizeDistributionWei
@@ -161,6 +190,7 @@ export default function CreateCompetition() {
 
       if (typeof window.ethereum === 'undefined') {
         toast.error("Please install MetaMask");
+        setIsSubmitting(false);
         return;
       }
 
@@ -181,6 +211,7 @@ export default function CreateCompetition() {
 
       const networkId = await web3.eth.net.getId();
       const explorerUrl = getExplorerUrl(networkId, receipt.transactionHash);
+      const contractAddress = receipt.contractAddress;
 
       toast.success(
         <div>
@@ -197,21 +228,44 @@ export default function CreateCompetition() {
         { id: 'deployment', duration: 10000 }
       );
 
-      console.log('Contract deployed at:', receipt.contractAddress);
-      console.log({
+      // Firebase part
+      // Upload image and dataset to Firebase Storage
+      // For now, we'll just use placeholder URLs
+      const imageUrl = imagePreview || "/api/placeholder/400/200";
+      const datasetUrl = "/datasets/placeholder.csv";
+
+      // Prepare the contest data
+      const contestData = {
         title,
         subtitle,
         description,
+        endDate: endDate.toISOString(),
+        datasetName: datasetName,
+        datasetUrl: datasetUrl,
+        image: imageUrl,
         winners,
-        endDate,
-        dataset,
-        image,
-        totalPrize: calculateTotalPrize(),
-        contractAddress: receipt.contractAddress,
-      });
+        totalPrizePool: calculateTotalPrize(),
+        contractAddress,
+        contractOwner: accounts[0],
+        hostWallet: accounts[0],
+        rules: [
+          "No external datasets allowed.",
+          "Submissions must be made before the deadline.",
+          "AI models must not use pre-trained datasets.",
+          "Each user can submit only one prediction file per day.",
+        ],
+      };
+
+      // Create the contest in Firestore
+      const contestId = await createContest(contestData);
+
+      // Navigate to the new contest page
+      router.push(`/contest/${contestId}`);
     } catch (error) {
-      console.error('Deployment error:', error);
-      toast.error("Error deploying contract. Please check the console for details.", { id: 'deployment' });
+      console.error("Error creating contest:", error);
+      toast.error("Failed to create contest. Please try again.");
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -430,8 +484,9 @@ export default function CreateCompetition() {
             <Button 
               type="submit" 
               className="w-full py-6 text-lg font-medium bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600 transition-all"
+              disabled={isSubmitting}
             >
-              Create Contest
+              {isSubmitting ? "Creating Contest..." : "Create Contest"}
             </Button>
           </form>
         </CardContent>
